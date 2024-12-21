@@ -2,7 +2,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from firebase_admin import firestore
 from .serializers import PlayerSerializer
-
+from datetime import datetime
 # Initialize Firestore
 db = firestore.client()
 
@@ -85,38 +85,61 @@ def update_player_stats(request, club_id):
         if not isinstance(goals_for, int) or not isinstance(goals_against, int):
             return Response({'error': 'Goals must be integers'}, status=400)
 
-        # Update statistics
-        if result == 'win':
-            player_data['wins'] += 1
-            player_data['tournament_points'] += 3
-        elif result == 'draw':
-            player_data['draws'] += 1
-            player_data['tournament_points'] += 1
-        elif result == 'loss':
-            player_data['losses'] += 1
+        # Get current month
+        current_month = datetime.now().strftime('%Y-%m')
+        monthly_ref = db.collection(f'players_monthly/{current_month}/records').document(club_id)
+        monthly = monthly_ref.get()
 
-        player_data['matches_played'] += 1
-        player_data['goals_for'] += goals_for
-        player_data['goals_against'] += goals_against
-        player_data['goal_difference'] = player_data['goals_for'] - player_data['goals_against']
+        # Initialize monthly stats if they don't exist
+        if not monthly.exists:
+            monthly_data = {
+                'wins': 0,
+                'draws': 0,
+                'losses': 0,
+                'matches_played': 0,
+                'goals_for': 0,
+                'goals_against': 0,
+                'goal_difference': 0,
+                'tournament_points': 0,
+                'win_percentage': 0,
+            }
+        else:
+            monthly_data = monthly.to_dict()
 
-        # Handle MOTM points
-        if motm:
-            player_data['tournament_points'] += 2
+        # Update statistics for both overall and monthly
+        for data in [player_data, monthly_data]:
+            if result == 'win':
+                data['wins'] += 1
+                data['tournament_points'] += 3
+            elif result == 'draw':
+                data['draws'] += 1
+                data['tournament_points'] += 1
+            elif result == 'loss':
+                data['losses'] += 1
 
-        # Avoid zero division
-        player_data['win_percentage'] = (
-            (player_data['wins'] / player_data['matches_played']) * 100
-            if player_data['matches_played'] > 0
-            else 0
-        )
+            data['matches_played'] += 1
+            data['goals_for'] += goals_for
+            data['goals_against'] += goals_against
+            data['goal_difference'] = data['goals_for'] - data['goals_against']
+
+            if motm:
+                data['tournament_points'] += 2
+
+            # Avoid zero division
+            data['win_percentage'] = (
+                (data['wins'] / data['matches_played']) * 100
+                if data['matches_played'] > 0
+                else 0
+            )
 
         # Save updated stats
         player_ref.set(player_data)
+        monthly_ref.set(monthly_data)
 
         return Response({
             'message': 'Player stats updated successfully',
-            'player_data': player_data
+            'player_data': player_data,
+            'monthly_data': monthly_data
         })
 
     return Response({'error': 'Player not found'}, status=404)
@@ -129,3 +152,54 @@ def delete_player(request, club_id):
         player_ref.delete()
         return Response({'message': 'Player deleted successfully'})
     return Response({'error': 'Player not found'}, status=404)
+@api_view(['GET'])
+def get_monthly_report(request, month, club_id=None):
+    """
+    Retrieve monthly stats for all players or a specific player for a given month.
+    """
+    monthly_ref = db.collection(f'players_monthly_{month}')
+
+    if club_id:
+        # Fetch stats for a specific player
+        player_ref = monthly_ref.document(club_id).get()
+        if player_ref.exists:
+            return Response(player_ref.to_dict())
+        return Response({'error': f'Player with club_id {club_id} not found for month {month}.'}, status=404)
+
+    # Fetch stats for all players
+    players_ref = monthly_ref.stream()
+    players = [player.to_dict() for player in players_ref]
+
+    if players:
+        return Response(players)
+    return Response({'message': f'No players found for month {month}.'}, status=404)
+@api_view(['POST'])
+def reset_monthly_stats(request):
+    """
+    Reset monthly stats for all players at the start of a new month.
+    """
+    # Get the current month
+    current_month = datetime.now().strftime('%Y-%m')
+    monthly_ref = db.collection(f'players_monthly/{current_month}/records')
+
+    # Fetch all players in the main 'players' collection
+    players_ref = db.collection('players').stream()
+    players = [player.to_dict() for player in players_ref]
+
+    for player in players:
+        club_id = player['club_id']
+        monthly_data = {
+            'wins': 0,
+            'draws': 0,
+            'losses': 0,
+            'matches_played': 0,
+            'goals_for': 0,
+            'goals_against': 0,
+            'goal_difference': 0,
+            'tournament_points': 0,
+            'win_percentage': 0,
+        }
+        # Save new monthly stats
+        monthly_ref.document(club_id).set(monthly_data)
+
+    return Response({'message': f'Monthly stats reset for all players for {current_month}.'})
