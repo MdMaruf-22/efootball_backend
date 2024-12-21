@@ -102,7 +102,7 @@ def update_player_stats(request, club_id):
 
         # Handle MOTM points
         if motm:
-            player_data['tournament_points'] += 5
+            player_data['tournament_points'] += 2
 
         # Avoid zero division
         player_data['win_percentage'] = (
