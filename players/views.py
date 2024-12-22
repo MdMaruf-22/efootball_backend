@@ -293,20 +293,37 @@ def reset_monthly_data(request):
 @api_view(['POST'])
 def create_new_month_table(request):
     """
-    Create a new table for the current month. If the table already exists, it returns a message.
+    Create a new table for the current month. 
+    If the table for the month before the previous month exists, remove it.
+    The table for the current month is created if it doesn't already exist.
     """
     current_month = datetime.now().strftime('%Y-%m')
     current_month_table = f'players_monthly_{current_month}'
+    
+    # Calculate the month before the previous month
+    # For example, if it's December, we want the table for October.
+    first_of_current_month = datetime.now().replace(day=1)
+    previous_month = first_of_current_month - timedelta(days=1)
+    before_previous_month = (previous_month.replace(day=1) - timedelta(days=1)).strftime('%Y-%m')
+    
+    before_previous_month_table = f'players_monthly_{before_previous_month}'
 
-    # Check if the current month's table already exists
+    # Check and delete the before previous month's table if it exists
+    before_previous_month_ref = db.collection(before_previous_month_table)
+    if before_previous_month_ref.get():
+        # Delete the before previous month's table (remove all documents in it)
+        before_previous_month_ref.delete()
+        print(f"Before previous month's table {before_previous_month_table} deleted.")
+    
+    # Check if the current month's table exists
     current_month_ref = db.collection(current_month_table)
     players_ref = current_month_ref.stream()
     players_list = list(players_ref)
 
     if players_list:
-        return Response({'message': f'Table for {current_month} already exists.'}, status=400)
+        return Response({'message': f'Table for {current_month} already exists.'}, status=200)
 
-    # Create the table by adding initial data (empty player data) for all players
+    # Create the table for the current month and add initial player data
     players_ref = db.collection('players').stream()
     players = [player.to_dict() for player in players_ref]
 
