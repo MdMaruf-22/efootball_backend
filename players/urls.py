@@ -13,4 +13,7 @@ urlpatterns = [
     path('monthly_report/<str:month>/', views.get_monthly_report, name='get_monthly_report_all'),
     path('monthly_report/<str:month>/<str:club_id>/', views.get_monthly_report, name='get_monthly_report_player'),
     path('reset_monthly_stats/', views.reset_monthly_data, name='reset_monthly_stats'),
+
+    # New endpoint to create the current month's table
+    path('create_new_month_table/', views.create_new_month_table, name='create_new_month_table'),  # URL pattern for create_new_month_table
 ]

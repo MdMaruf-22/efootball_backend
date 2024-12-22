@@ -45,8 +45,17 @@ def add_player(request):
         # Save to the main `players` table
         db.collection('players').document(data['club_id']).set(data)
 
-        # Save to the current month's table
+        # Check and create the current month's table if not exists
         current_month = datetime.now().strftime('%Y-%m')
+        current_month_table = f'players_monthly_{current_month}'
+        current_month_ref = db.collection(current_month_table)
+
+        # If the table doesn't exist, create it
+        players_ref = current_month_ref.stream()
+        if not list(players_ref):
+            create_new_month_table(request)
+
+        # Add player stats for the current month
         monthly_data = {
             'name': data['name'],
             'id': data['club_id'],
@@ -60,10 +69,11 @@ def add_player(request):
             'tournament_points': 0,
             'win_percentage': 0,
         }
-        db.collection(f'players_monthly_{current_month}').document(data['club_id']).set(monthly_data)
+        db.collection(current_month_table).document(data['club_id']).set(monthly_data)
 
         return Response({'message': 'Player added successfully'})
     return Response(serializer.errors, status=400)
+
 
 
 # Get a Player
@@ -106,10 +116,18 @@ def update_player_stats(request, club_id):
 
         # Get current month
         current_month = datetime.now().strftime('%Y-%m')
-        monthly_ref = db.collection(f'players_monthly_{current_month}').document(club_id)
+        current_month_table = f'players_monthly_{current_month}'
+        monthly_ref = db.collection(current_month_table).document(club_id)
+
+        # If the table doesn't exist, create it
+        current_month_ref = db.collection(current_month_table)
+        players_ref = current_month_ref.stream()
+        if not list(players_ref):
+            create_new_month_table(request)
+
+        # Get the current month's player stats
         monthly = monthly_ref.get()
 
-        # Initialize monthly stats if they don't exist
         if not monthly.exists:
             monthly_data = {
                 'name': player_data.get('name', ''),
@@ -165,9 +183,6 @@ def update_player_stats(request, club_id):
 
     return Response({'error': 'Player not found'}, status=404)
 
-
-# Delete a Player
-@api_view(['DELETE'])
 @api_view(['DELETE'])
 def delete_player(request, club_id):
     # Delete from the main `players` table
@@ -175,15 +190,25 @@ def delete_player(request, club_id):
     if player_ref.get().exists:
         player_ref.delete()
 
-        # Delete from the current month's table
+        # Check and create the current month's table if not exists
         current_month = datetime.now().strftime('%Y-%m')
-        monthly_ref = db.collection(f'players_monthly_{current_month}').document(club_id)
+        current_month_table = f'players_monthly_{current_month}'
+        current_month_ref = db.collection(current_month_table)
+
+        # If the table doesn't exist, create it
+        players_ref = current_month_ref.stream()
+        if not list(players_ref):
+            create_new_month_table(request)
+
+        # Delete from the current month's table
+        monthly_ref = db.collection(current_month_table).document(club_id)
         if monthly_ref.get().exists:
             monthly_ref.delete()
 
         return Response({'message': 'Player deleted successfully'})
 
     return Response({'error': 'Player not found'}, status=404)
+
 @api_view(['GET'])
 def get_monthly_report(request, month, club_id=None):
     """
@@ -265,3 +290,41 @@ def reset_monthly_data(request):
     return Response({
         'message': f'Reset successful for {updated_count} players in table "{current_month_table}".',
     })
+@api_view(['POST'])
+def create_new_month_table(request):
+    """
+    Create a new table for the current month. If the table already exists, it returns a message.
+    """
+    current_month = datetime.now().strftime('%Y-%m')
+    current_month_table = f'players_monthly_{current_month}'
+
+    # Check if the current month's table already exists
+    current_month_ref = db.collection(current_month_table)
+    players_ref = current_month_ref.stream()
+    players_list = list(players_ref)
+
+    if players_list:
+        return Response({'message': f'Table for {current_month} already exists.'}, status=400)
+
+    # Create the table by adding initial data (empty player data) for all players
+    players_ref = db.collection('players').stream()
+    players = [player.to_dict() for player in players_ref]
+
+    for player in players:
+        # Initialize new player stats for the month
+        monthly_data = {
+            'name': player['name'],
+            'id': player['club_id'],
+            'wins': 0,
+            'draws': 0,
+            'losses': 0,
+            'matches_played': 0,
+            'goals_for': 0,
+            'goals_against': 0,
+            'goal_difference': 0,
+            'tournament_points': 0,
+            'win_percentage': 0,
+        }
+        current_month_ref.document(player['club_id']).set(monthly_data)
+
+    return Response({'message': f'New table for {current_month} created successfully.'})
