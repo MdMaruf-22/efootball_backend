@@ -58,7 +58,7 @@ def add_player(request):
         # Add player stats for the current month
         monthly_data = {
             'name': data['name'],
-            'id': data['club_id'],
+            'club_id': data['club_id'],
             'wins': 0,
             'draws': 0,
             'losses': 0,
@@ -131,7 +131,7 @@ def update_player_stats(request, club_id):
         if not monthly.exists:
             monthly_data = {
                 'name': player_data.get('name', ''),
-                'id': player_data.get('id', ''),
+                'club_id': player_data.get('id', ''),
                 'wins': 0,
                 'draws': 0,
                 'losses': 0,
@@ -271,7 +271,7 @@ def reset_monthly_data(request):
         # Preserve name and id, reset other stats
         reset_data = {
             'name': player_data.get('name', ''),
-            'id': player_data.get('id', ''),
+            'club_id': player_data.get('id', ''),
             'wins': 0,
             'draws': 0,
             'losses': 0,
@@ -331,7 +331,7 @@ def create_new_month_table(request):
         # Initialize new player stats for the month
         monthly_data = {
             'name': player['name'],
-            'id': player['club_id'],
+            'club_id': player['club_id'],
             'wins': 0,
             'draws': 0,
             'losses': 0,
