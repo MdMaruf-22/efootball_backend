@@ -12,5 +12,5 @@ urlpatterns = [
     # New endpoints for monthly report and reset
     path('monthly_report/<str:month>/', views.get_monthly_report, name='get_monthly_report_all'),
     path('monthly_report/<str:month>/<str:club_id>/', views.get_monthly_report, name='get_monthly_report_player'),
-    path('reset_monthly_stats/', views.reset_monthly_stats, name='reset_monthly_stats'),
+    path('reset_monthly_stats/', views.reset_monthly_data, name='reset_monthly_stats'),
 ]

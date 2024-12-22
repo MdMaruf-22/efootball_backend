@@ -2,7 +2,8 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from firebase_admin import firestore
 from .serializers import PlayerSerializer
-from datetime import datetime
+from datetime import datetime, timedelta
+
 # Initialize Firestore
 db = firestore.client()
 
@@ -40,10 +41,30 @@ def add_player(request):
     serializer = PlayerSerializer(data=request.data)
     if serializer.is_valid():
         data = serializer.validated_data
-        # Save to Firestore
+
+        # Save to the main `players` table
         db.collection('players').document(data['club_id']).set(data)
+
+        # Save to the current month's table
+        current_month = datetime.now().strftime('%Y-%m')
+        monthly_data = {
+            'name': data['name'],
+            'id': data['club_id'],
+            'wins': 0,
+            'draws': 0,
+            'losses': 0,
+            'matches_played': 0,
+            'goals_for': 0,
+            'goals_against': 0,
+            'goal_difference': 0,
+            'tournament_points': 0,
+            'win_percentage': 0,
+        }
+        db.collection(f'players_monthly_{current_month}').document(data['club_id']).set(monthly_data)
+
         return Response({'message': 'Player added successfully'})
     return Response(serializer.errors, status=400)
+
 
 # Get a Player
 @api_view(['GET'])
@@ -62,8 +83,6 @@ def get_all_players(request):
     if players:
         return Response(players)
     return Response({'message': 'No players found'}, status=404)
-
-# Update Player Stats
 @api_view(['POST'])
 def update_player_stats(request, club_id):
     player_ref = db.collection('players').document(club_id)
@@ -87,12 +106,14 @@ def update_player_stats(request, club_id):
 
         # Get current month
         current_month = datetime.now().strftime('%Y-%m')
-        monthly_ref = db.collection(f'players_monthly/{current_month}/records').document(club_id)
+        monthly_ref = db.collection(f'players_monthly_{current_month}').document(club_id)
         monthly = monthly_ref.get()
 
         # Initialize monthly stats if they don't exist
         if not monthly.exists:
             monthly_data = {
+                'name': player_data.get('name', ''),
+                'id': player_data.get('id', ''),
                 'wins': 0,
                 'draws': 0,
                 'losses': 0,
@@ -144,13 +165,24 @@ def update_player_stats(request, club_id):
 
     return Response({'error': 'Player not found'}, status=404)
 
+
 # Delete a Player
 @api_view(['DELETE'])
+@api_view(['DELETE'])
 def delete_player(request, club_id):
+    # Delete from the main `players` table
     player_ref = db.collection('players').document(club_id)
     if player_ref.get().exists:
         player_ref.delete()
+
+        # Delete from the current month's table
+        current_month = datetime.now().strftime('%Y-%m')
+        monthly_ref = db.collection(f'players_monthly_{current_month}').document(club_id)
+        if monthly_ref.get().exists:
+            monthly_ref.delete()
+
         return Response({'message': 'Player deleted successfully'})
+
     return Response({'error': 'Player not found'}, status=404)
 @api_view(['GET'])
 def get_monthly_report(request, month, club_id=None):
@@ -173,22 +205,48 @@ def get_monthly_report(request, month, club_id=None):
     if players:
         return Response(players)
     return Response({'message': f'No players found for month {month}.'}, status=404)
+
 @api_view(['POST'])
-def reset_monthly_stats(request):
+def reset_monthly_data(request):
     """
-    Reset monthly stats for all players at the start of a new month.
+    Reset all player stats for the current month. If the table for the current month does not exist,
+    delete the previous month's table and create a new table for the current month.
     """
-    # Get the current month
+    # Get the current and previous months
     current_month = datetime.now().strftime('%Y-%m')
-    monthly_ref = db.collection(f'players_monthly/{current_month}/records')
+    previous_month = (datetime.now().replace(day=1) - timedelta(days=1)).strftime('%Y-%m')
 
-    # Fetch all players in the main 'players' collection
-    players_ref = db.collection('players').stream()
-    players = [player.to_dict() for player in players_ref]
+    # Reference for current and previous month tables
+    current_month_table = f'players_monthly_{current_month}'
+    previous_month_table = f'players_monthly_{previous_month}'
 
-    for player in players:
-        club_id = player['club_id']
-        monthly_data = {
+    current_month_ref = db.collection(current_month_table)
+    previous_month_ref = db.collection(previous_month_table)
+
+    # Check if the current month's table exists
+    players_ref = current_month_ref.stream()
+    players_list = list(players_ref)
+
+    if not players_list:
+        # If the current month's table does not exist, delete the previous month's table
+        previous_players_ref = previous_month_ref.stream()
+        for player in previous_players_ref:
+            previous_month_ref.document(player.id).delete()
+
+        # Initialize a new table for the current month
+        return Response({
+            'message': f'Previous table "{previous_month_table}" deleted. New table "{current_month_table}" created for the current month.'
+        })
+
+    # Reset data for the current month
+    updated_count = 0
+    for player in players_list:
+        player_data = player.to_dict()
+
+        # Preserve name and id, reset other stats
+        reset_data = {
+            'name': player_data.get('name', ''),
+            'id': player_data.get('id', ''),
             'wins': 0,
             'draws': 0,
             'losses': 0,
@@ -199,7 +257,11 @@ def reset_monthly_stats(request):
             'tournament_points': 0,
             'win_percentage': 0,
         }
-        # Save new monthly stats
-        monthly_ref.document(club_id).set(monthly_data)
 
-    return Response({'message': f'Monthly stats reset for all players for {current_month}.'})
+        # Update the document with reset data
+        current_month_ref.document(player.id).set(reset_data)
+        updated_count += 1
+
+    return Response({
+        'message': f'Reset successful for {updated_count} players in table "{current_month_table}".',
+    })
