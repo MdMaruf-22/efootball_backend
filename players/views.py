@@ -93,6 +93,100 @@ def get_all_players(request):
     if players:
         return Response(players)
     return Response({'message': 'No players found'}, status=404)
+# @api_view(['POST'])
+# def update_player_stats(request, club_id):
+#     player_ref = db.collection('players').document(club_id)
+#     player = player_ref.get()
+#
+#     if player.exists:
+#         player_data = player.to_dict()
+#         stats = request.data
+#
+#         # Validate input
+#         result = stats.get('result')  # Expected: 'win', 'draw', 'loss'
+#         goals_for = stats.get('goals_for', 0)
+#         goals_against = stats.get('goals_against', 0)
+#         motm = stats.get('motm', False)
+#
+#         if result not in ['win', 'draw', 'loss']:
+#             return Response({'error': 'Invalid result value. Must be "win", "draw", or "loss".'}, status=400)
+#
+#         if not isinstance(goals_for, int) or not isinstance(goals_against, int):
+#             return Response({'error': 'Goals must be integers'}, status=400)
+#
+#         # Get current month
+#         current_month = datetime.now().strftime('%Y-%m')
+#         current_month_table = f'players_monthly_{current_month}'
+#         monthly_ref = db.collection(current_month_table).document(club_id)
+#
+#         # If the table doesn't exist, create it
+#         current_month_ref = db.collection(current_month_table)
+#         players_ref = current_month_ref.stream()
+#         if not list(players_ref):
+#             create_new_month_table(request)
+#
+#         # Get the current month's player stats
+#         monthly = monthly_ref.get()
+#
+#         if not monthly.exists:
+#             monthly_data = {
+#                 'name': player_data.get('name', ''),
+#                 'club_id': player_data.get('id', ''),
+#                 'wins': 0,
+#                 'draws': 0,
+#                 'losses': 0,
+#                 'matches_played': 0,
+#                 'goals_for': 0,
+#                 'goals_against': 0,
+#                 'goal_difference': 0,
+#                 'tournament_points': 0,
+#                 'win_percentage': 0,
+#             }
+#         else:
+#             monthly_data = monthly.to_dict()
+#
+#         # Update statistics for both overall and monthly
+#         for data in [player_data, monthly_data]:
+#             if result == 'win':
+#                 data['wins'] += 1
+#                 data['tournament_points'] += 3
+#             elif result == 'draw':
+#                 data['draws'] += 1
+#                 data['tournament_points'] += 1
+#             elif result == 'loss':
+#                 data['losses'] += 1
+#
+#             data['matches_played'] += 1
+#             data['goals_for'] += goals_for
+#             data['goals_against'] += goals_against
+#             data['goal_difference'] = data['goals_for'] - data['goals_against']
+#
+#             if motm:
+#                 data['tournament_points'] += 2
+#
+#             # Avoid zero division
+#             data['win_percentage'] = (
+#                 (data['wins'] / data['matches_played']) * 100
+#                 if data['matches_played'] > 0
+#                 else 0
+#             )
+#
+#         # Save updated stats
+#         player_ref.set(player_data)
+#         monthly_ref.set(monthly_data)
+#
+#         return Response({
+#             'message': 'Player stats updated successfully',
+#             'player_data': player_data,
+#             'monthly_data': monthly_data
+#         })
+#
+#     return Response({'error': 'Player not found'}, status=404)
+
+
+#updated
+
+
 @api_view(['POST'])
 def update_player_stats(request, club_id):
     player_ref = db.collection('players').document(club_id)
@@ -107,16 +201,18 @@ def update_player_stats(request, club_id):
         goals_for = stats.get('goals_for', 0)
         goals_against = stats.get('goals_against', 0)
         motm = stats.get('motm', False)
+        month = stats.get('month')  # Month should come from frontend
 
-        if result not in ['win', 'draw', 'loss']:
-            return Response({'error': 'Invalid result value. Must be "win", "draw", or "loss".'}, status=400)
+        if not month:
+            return Response({'error': 'Month is required.'}, status=400)
 
-        if not isinstance(goals_for, int) or not isinstance(goals_against, int):
-            return Response({'error': 'Goals must be integers'}, status=400)
+        # Ensure month is formatted as 'YYYY-MM'
+        try:
+            month = datetime.strptime(month, '%Y-%m').strftime('%Y-%m')
+        except ValueError:
+            return Response({'error': 'Invalid month format. Use YYYY-MM.'}, status=400)
 
-        # Get current month
-        current_month = datetime.now().strftime('%Y-%m')
-        current_month_table = f'players_monthly_{current_month}'
+        current_month_table = f'players_monthly_{month}'
         monthly_ref = db.collection(current_month_table).document(club_id)
 
         # If the table doesn't exist, create it
@@ -182,6 +278,7 @@ def update_player_stats(request, club_id):
         })
 
     return Response({'error': 'Player not found'}, status=404)
+
 
 @api_view(['DELETE'])
 def delete_player(request, club_id):
@@ -293,28 +390,29 @@ def reset_monthly_data(request):
 @api_view(['POST'])
 def create_new_month_table(request):
     """
-    Create a new table for the current month. 
-    If the table for the month before the previous month exists, remove it.
+    Create a new table for the current month.
+    If the table for the month before the previous month exists, remove its documents.
     The table for the current month is created if it doesn't already exist.
     """
     current_month = datetime.now().strftime('%Y-%m')
     current_month_table = f'players_monthly_{current_month}'
-    
+
     # Calculate the month before the previous month
-    # For example, if it's December, we want the table for October.
     first_of_current_month = datetime.now().replace(day=1)
     previous_month = first_of_current_month - timedelta(days=1)
     before_previous_month = (previous_month.replace(day=1) - timedelta(days=1)).strftime('%Y-%m')
-    
+
     before_previous_month_table = f'players_monthly_{before_previous_month}'
 
-    # Check and delete the before previous month's table if it exists
+    # Check and delete documents from the before previous month's table if it exists
     before_previous_month_ref = db.collection(before_previous_month_table)
-    if before_previous_month_ref.get():
-        # Delete the before previous month's table (remove all documents in it)
-        before_previous_month_ref.delete()
-        print(f"Before previous month's table {before_previous_month_table} deleted.")
-    
+    docs = before_previous_month_ref.stream()
+
+    for doc in docs:
+        doc.reference.delete()  # Delete each document inside the collection
+
+    print(f"All documents in {before_previous_month_table} deleted.")
+
     # Check if the current month's table exists
     current_month_ref = db.collection(current_month_table)
     players_ref = current_month_ref.stream()
